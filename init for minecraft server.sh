@@ -38,4 +38,4 @@ EOF
 
 chmod +x ./start.sh
 
-cat "eula=true" >> eula.txt
+echo "eula=true" >> eula.txt

@@ -1,3 +1,4 @@
+#!/bin/bash
 #zsh
 
 #install oh my zsh
@@ -21,11 +22,11 @@ git clone https://github.com/zsh-users/zsh-completions ${ZSH_CUSTOM:-${ZSH:-~/.o
 #autojump
 git clone https://github.com/wting/autojump.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/autojump
 cd ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/autojump
-./install.py
+python install.py
 
 #modify ~/.zshrc
 
-cat << EOF > ~/.zshrc
+cat << 'EOF' > ~/.zshrc
 
 # Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
 # Initialization code that may require console input (password prompts, [y/n]
@@ -116,7 +117,7 @@ plugins=(
 )
 
 
-[[ -s /home/akari/.autojump/etc/profile.d/autojump.sh ]] && source /home/akari/.autojump/etc/profile.d/autojump.sh                                                                                                                                                                      
+[[ -s ~/.autojump/etc/profile.d/autojump.sh ]] && source ~/.autojump/etc/profile.d/autojump.sh                                                                                                                                                                      
 autoload -U compinit && compinit -u 
 
 fpath+=${ZSH_CUSTOM:-${ZSH:-~/.oh-my-zsh}/custom}/plugins/zsh-completions/src
@@ -159,7 +160,7 @@ EOF
 #tmux 
 git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 
-cat << EOF >> ~/.tmux.conf
+cat << 'EOF' >> ~/.tmux.conf
 # List of plugins
 set -g @plugin 'tmux-plugins/tpm'
 set -g @plugin 'tmux-plugins/tmux-sensible'
@@ -168,6 +169,7 @@ set -g @plugin 'tmux-plugins/tmux-resurrect'
 
 set -g default-terminal "screen-256color"
 set -g default-shell /bin/zsh
+set -g mouse on
 unbind -n MouseDown3Pane
 
 
