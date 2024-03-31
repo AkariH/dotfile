@@ -3,6 +3,9 @@
 VELOCITY_URL=https://api.papermc.io/v2/projects/velocity/versions/3.3.0-SNAPSHOT/builds/371/downloads/velocity-3.3.0-SNAPSHOT-371.jar
 PAPERMC_URL=https://api.papermc.io/v2/projects/paper/versions/1.20.4/builds/463/downloads/paper-1.20.4-463.jar
 
+#add raw.githubusercontent.com to hosts
+echo "185.199.108.133 raw.githubusercontent.com" >> /etc/hosts
+
 #update repo and upgrade apps
 apt update -y && apt upgrade -y
 
