@@ -182,3 +182,6 @@ run '~/.tmux/plugins/tpm/tpm'
 
 
 EOF
+
+#apply changes to tmux
+tmux source ~/.tmux.conf
