@@ -8,4 +8,4 @@ apt update -y && apt upgrade -y
 apt install zsh tmux htop glances curl python-is-python3 p7zip-full ncdu neofetch -y
 
 #change default shell to zsh
-chsh -s $(which zsh)
+chsh -s $(which zsh) akari
