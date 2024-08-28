@@ -114,6 +114,7 @@ plugins=(
 	git
 	sudo
 	command-not-found
+	colored-man-pages
 	
 
 	zsh-autosuggestions
