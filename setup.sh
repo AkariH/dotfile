@@ -44,11 +44,11 @@ declare -a BG_PIDS=()
 # PHASE 1: Background Tasks (No Dependencies)
 # ==========================================
 
-# Detect architecture
+# Detect architecture (Neovim v0.10+ uses new naming)
 ARCH=$(uname -m)
 case $ARCH in
-    x86_64)  NVIM_ARCH="nvim-linux64" ;;
-    aarch64) NVIM_ARCH="nvim-linux64" ;;  # ARM64 uses same package name now
+    x86_64)  NVIM_ARCH="nvim-linux-x86_64" ;;
+    aarch64) NVIM_ARCH="nvim-linux-arm64" ;;
     *)       err "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
