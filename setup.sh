@@ -100,7 +100,34 @@ BG_PIDS+=($!)
     if [ ! -d ~/.tmux/plugins/tpm ]; then
         git clone --depth=1 https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm >/dev/null 2>&1 || true
     fi
-    log "✅ [BG-2] TPM installed."
+    log "✅ [BG-2] TPM installed in $((END - START))s"
+) &
+BG_PIDS+=($!)
+
+# JOB 3: NvChad Configuration
+(
+    START=$(date +%s)
+    log "🎨 [BG-3] Installing NvChad..."
+    
+    # Backup existing config if needed
+    if [ -d "$HOME/.config/nvim" ]; then
+        BACKUP="$HOME/.config/nvim.bak.$(date +%s)"
+        mv "$HOME/.config/nvim" "$BACKUP"
+        warn "[BG-3] Existing config moved to $BACKUP"
+    fi
+    
+    # Wait for git
+    WAIT_COUNT=0
+    while ! command -v git &> /dev/null; do
+        sleep 2
+        ((WAIT_COUNT++)) || true
+        if [ $WAIT_COUNT -gt 30 ]; then exit 0; fi
+    done
+
+    git clone https://github.com/NvChad/starter ~/.config/nvim >/dev/null 2>&1 || true
+    
+    END=$(date +%s)
+    log "✅ [BG-3] NvChad installed in $((END - START))s"
 ) &
 BG_PIDS+=($!)
 
@@ -163,8 +190,9 @@ select_fastest_mirror() {
     if [ -n "$WINNER" ]; then
         log "🏆 Applying fastest mirror: $WINNER"
         [ ! -f /etc/apt/sources.list.bak ] && sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak
-        sudo sed -i "s|http://archive.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
-        sudo sed -i "s|http://security.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
+        # Robust regex to catch cn.archive.ubuntu.com, etc.
+        sudo sed -i -E "s|http://.*archive.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
+        sudo sed -i -E "s|http://security.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
     else
         warn "Mirror optimization failed, using default sources."
     fi
@@ -305,7 +333,7 @@ if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]
 fi
 
 export ZSH="$HOME/.oh-my-zsh"
-export PATH="$PATH:/opt/nvim-linux64/bin"
+# Neovim is now symlinked to /usr/local/bin, no need to modify PATH
 
 ZSH_THEME="powerlevel10k/powerlevel10k"
 
@@ -371,7 +399,7 @@ log "⏱️  Total time: ${DURATION}s"
 log ""
 log "📋 What's installed:"
 log "   • Zsh + Oh My Zsh + Powerlevel10k"
-log "   • Neovim (latest)"
+log "   • Neovim (latest) + NvChad"
 log "   • Docker + Compose"
 log "   • Tmux + TPM"
 log "   • Utilities: htop, btop, glances, ncdu, neofetch"
