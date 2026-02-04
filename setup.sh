@@ -3,8 +3,8 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# 修复版 v3: 完整错误处理 + 多项优化
-set -euo pipefail  # 更严格的错误处理
+# v4: Neovim URL Fix + Per-Step Timing
+set -euo pipefail
 START_TIME=$(date +%s)
 
 # ==========================================
@@ -20,6 +20,16 @@ warn() {
 
 err() {
     echo -e "\033[31m[ERROR] $1\033[0m" >&2
+}
+
+# Timer wrapper
+measure() {
+    local NAME="$1"
+    local START=$(date +%s)
+    shift
+    "$@"
+    local END=$(date +%s)
+    log "⏱️  [$NAME] took $((END - START))s"
 }
 
 # Check if running as root (not recommended)
@@ -42,18 +52,33 @@ case $ARCH in
     *)       err "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
-# JOB 1: Neovim Install (Network Bound, independent)
+# JOB 1: Neovim Install (with fallback URL)
 (
-    log "☁️ [BG-1] Downloading Neovim ($ARCH)..."
+    START_NVIM=$(date +%s)
+    log "☁️ [BG-1] Downloading Neovim ($NVIM_ARCH)..."
+    
+    # Primary: Latest release
     NVIM_URL="https://github.com/neovim/neovim/releases/latest/download/${NVIM_ARCH}.tar.gz"
-    if curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz; then
-        sudo rm -rf /opt/nvim /opt/nvim-linux64
-        sudo tar -C /opt -xzf /tmp/nvim.tar.gz
-        rm -f /tmp/nvim.tar.gz
-        log "✅ [BG-1] Neovim installed."
-    else
-        warn "[BG-1] Neovim download failed, skipping."
+    
+    if ! curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz 2>/dev/null; then
+        # Fallback: Known good version
+        warn "[BG-1] Latest failed, trying v0.9.5..."
+        NVIM_URL="https://github.com/neovim/neovim/releases/download/v0.9.5/${NVIM_ARCH}.tar.gz"
+        if ! curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz; then
+            err "[BG-1] Neovim download failed completely."
+            exit 1
+        fi
     fi
+    
+    sudo rm -rf /opt/nvim /opt/nvim-linux64 /opt/${NVIM_ARCH}
+    sudo tar -C /opt -xzf /tmp/nvim.tar.gz
+    rm -f /tmp/nvim.tar.gz
+    
+    # Create symlink for PATH accessibility
+    sudo ln -sf /opt/${NVIM_ARCH}/bin/nvim /usr/local/bin/nvim
+    
+    END_NVIM=$(date +%s)
+    log "✅ [BG-1] Neovim installed in $((END_NVIM - START_NVIM))s"
 ) &
 BG_PIDS+=($!)
 
