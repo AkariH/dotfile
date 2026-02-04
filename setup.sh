@@ -84,6 +84,7 @@ BG_PIDS+=($!)
 
 # JOB 2: Tmux Plugin Manager (independent, doesn't need OMZ)
 (
+    START=$(date +%s)
     # Wait for git (max 60 seconds)
     WAIT_COUNT=0
     while ! command -v git &> /dev/null; do
@@ -100,6 +101,8 @@ BG_PIDS+=($!)
     if [ ! -d ~/.tmux/plugins/tpm ]; then
         git clone --depth=1 https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm >/dev/null 2>&1 || true
     fi
+    
+    END=$(date +%s)
     log "✅ [BG-2] TPM installed in $((END - START))s"
 ) &
 BG_PIDS+=($!)
