@@ -3,7 +3,7 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v4.5: Graceful Signal Trapping (Ctrl+C Cleanup) & Process Lifecycle
+# v5.0: 100% Pure Idempotency, Signal Trapping & Cloud Auto-Tuning
 set -euo pipefail
 START_TIME=$(date +%s)
 
@@ -127,16 +127,8 @@ BG_PIDS+=($!)
 # JOB 3: NvChad Configuration
 (
     START=$(date +%s)
-    log "🎨 [BG-3] Installing NvChad..."
     
-    # Backup existing config if needed
-    if [ -d "$HOME/.config/nvim" ]; then
-        BACKUP="$HOME/.config/nvim.bak.$(date +%s)"
-        mv "$HOME/.config/nvim" "$BACKUP"
-        warn "[BG-3] Existing config moved to $BACKUP"
-    fi
-    
-    # Wait for git
+    # Wait for git (max 60 seconds)
     WAIT_COUNT=0
     while ! command -v git &> /dev/null; do
         sleep 2
@@ -144,10 +136,15 @@ BG_PIDS+=($!)
         if [ $WAIT_COUNT -gt 30 ]; then exit 0; fi
     done
 
-    git clone https://github.com/NvChad/starter ~/.config/nvim >/dev/null 2>&1 || true
-    
-    END=$(date +%s)
-    log "✅ [BG-3] NvChad installed in $((END - START))s"
+    # 100% Idempotent check: clone only if not already present
+    if [ ! -d "$HOME/.config/nvim" ]; then
+        log "🎨 [BG-3] Installing NvChad..."
+        git clone https://github.com/NvChad/starter ~/.config/nvim >/dev/null 2>&1 || true
+        END=$(date +%s)
+        log "✅ [BG-3] NvChad installed in $((END - START))s"
+    else
+        log "🎨 [BG-3] NvChad already installed (skipping clone)."
+    fi
 ) &
 BG_PIDS+=($!)
 
