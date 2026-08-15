@@ -3,7 +3,7 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v5.2: Unified APT Package Array & Declarative Service Toggles
+# v5.3: AWS IMDS Region Auto-Discovery & Factory Mirror Preservation
 set -euo pipefail
 START_TIME=$(date +%s)
 
@@ -226,9 +226,13 @@ select_fastest_mirror() {
         "http://archive.ubuntu.com/ubuntu"
     )
     
-    # Dynamically extract original/default cloud mirror if available (e.g. AWS ec2.archive.ubuntu.com / GCP / Azure)
+    # 1. Dynamically extract original/factory cloud mirror from .bak first (prevents re-run overwrite)
     local ORIGINAL_MIRROR=""
-    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+    if [ -f /etc/apt/sources.list.d/ubuntu.sources.bak ]; then
+        ORIGINAL_MIRROR=$(grep -E -o "https?://[a-zA-Z0-9.-]+/ubuntu" /etc/apt/sources.list.d/ubuntu.sources.bak 2>/dev/null | head -n 1 || true)
+    elif [ -f /etc/apt/sources.list.bak ]; then
+        ORIGINAL_MIRROR=$(grep -E -o "https?://[a-zA-Z0-9.-]+/ubuntu" /etc/apt/sources.list.bak 2>/dev/null | head -n 1 || true)
+    elif [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
         ORIGINAL_MIRROR=$(grep -E -o "https?://[a-zA-Z0-9.-]+/ubuntu" /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | head -n 1 || true)
     elif [ -f /etc/apt/sources.list ]; then
         ORIGINAL_MIRROR=$(grep -E -o "https?://[a-zA-Z0-9.-]+/ubuntu" /etc/apt/sources.list 2>/dev/null | head -n 1 || true)
@@ -242,6 +246,21 @@ select_fastest_mirror() {
         if [ $EXISTS -eq 0 ]; then
             MIRROR_NAMES+=("Original/Cloud")
             MIRROR_URLS+=("$ORIGINAL_MIRROR")
+        fi
+    fi
+
+    # 2. If on AWS (Lightsail/EC2), query 169.254.169.254 to auto-detect AWS Region mirror (5ms latency!)
+    local AWS_REGION=""
+    AWS_REGION=$(curl -4 -s -m 1 http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || true)
+    if [ -n "$AWS_REGION" ]; then
+        local AWS_MIRROR="http://${AWS_REGION}.ec2.archive.ubuntu.com/ubuntu"
+        local AWS_EXISTS=0
+        for url in "${MIRROR_URLS[@]}"; do
+            if [ "$url" = "$AWS_MIRROR" ]; then AWS_EXISTS=1; break; fi
+        done
+        if [ $AWS_EXISTS -eq 0 ]; then
+            MIRROR_NAMES+=("AWS-${AWS_REGION}")
+            MIRROR_URLS+=("$AWS_MIRROR")
         fi
     fi
     
