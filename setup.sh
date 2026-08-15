@@ -3,7 +3,7 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v4.4: Dynamic Cloud/Original Mirror Race & IPv4 Speedtest
+# v4.5: Graceful Signal Trapping (Ctrl+C Cleanup) & Process Lifecycle
 set -euo pipefail
 START_TIME=$(date +%s)
 
@@ -32,18 +32,30 @@ measure() {
     log "⏱️  [$NAME] took $((END - START))s"
 }
 
+# Store PIDs to wait for them later & clean them up on interrupt
+declare -a BG_PIDS=()
+
+# Graceful cleanup on interrupt (Ctrl+C / SIGTERM)
+cleanup() {
+    echo ""
+    warn "🛑 Interrupted by user! Terminating all background processes..."
+    for pid in "${BG_PIDS[@]}"; do
+        kill -9 "$pid" 2>/dev/null || true
+    done
+    exit 130
+}
+trap cleanup INT TERM
+
 # Ensure sudo session is active and keep it alive for background tasks
 if [ "$EUID" -ne 0 ]; then
     if sudo -v 2>/dev/null; then
-        # Keep-alive sudo in background while script runs
-        while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+        # Keep-alive sudo in background while script runs (tracked in BG_PIDS for clean exit)
+        ( while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null ) &
+        BG_PIDS+=($!)
     fi
 else
     warn "Running as root is not recommended. Consider running as normal user with sudo."
 fi
-
-# Store PIDs to wait for them later
-declare -a BG_PIDS=()
 
 # ==========================================
 # PHASE 1: Background Tasks (No Dependencies)
@@ -457,4 +469,10 @@ log "⚠️  IMPORTANT: Please run these commands:"
 log "   1. Log out and log back in (for docker group & zsh)"
 log "   2. Run 'p10k configure' to setup your prompt theme"
 log ""
+
+# Cleanly terminate any remaining background keepalive loops
+for pid in "${BG_PIDS[@]}"; do
+    kill "$pid" 2>/dev/null || true
+done
+
 
