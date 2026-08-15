@@ -3,9 +3,28 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v5.0: 100% Pure Idempotency, Signal Trapping & Cloud Auto-Tuning
+# v5.1: Declarative Service Selection, Custom Extra APT Packages & Cloud-Ready
 set -euo pipefail
 START_TIME=$(date +%s)
+
+# ==========================================
+# ⚙️ User Feature Selection (服务选择列表)
+# ==========================================
+# 默认全选 (true)。若某台机器不需要某项服务，直接改为 false 即可跳过！
+ENABLE_NEOVIM=true       # Neovim (最新二进制 /usr/local/bin/nvim)
+ENABLE_NVCHAD=true       # NvChad 开箱即用配置 (~/.config/nvim)
+ENABLE_TMUX=true         # Tmux + 插件管理器 (TPM) + 状态恢复
+ENABLE_ZSH=true          # Zsh + Oh My Zsh + Powerlevel10k + 5大插件
+ENABLE_DOCKER=true       # Docker CE + CLI + Compose Plugin
+ENABLE_UTILITIES=true    # 常用 CLI 监控分析工具箱 (htop, btop, glances, fastfetch, ncdu)
+
+# 📦 自定义额外 APT 软件包列表 (仅限于 apt 包):
+# 在数组中直接添加您需要的额外 apt 软件包名，例如: "podman" "ripgrep" "fd-find"
+EXTRA_APT_PACKAGES=(
+    # "podman"
+    # "ripgrep"
+    # "fd-find"
+)
 
 # ==========================================
 # Helper Functions
@@ -46,9 +65,9 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-# Ensure sudo session is active and keep it alive for background tasks
+# Sudo check and background keepalive (using -n to avoid interactive password prompt)
 if [ "$EUID" -ne 0 ]; then
-    if sudo -v 2>/dev/null; then
+    if sudo -n true 2>/dev/null; then
         # Keep-alive sudo in background while script runs (tracked in BG_PIDS for clean exit)
         ( while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null ) &
         BG_PIDS+=($!)
@@ -70,83 +89,95 @@ case $ARCH in
 esac
 
 # JOB 1: Neovim Install (with fallback URL)
-(
-    START_NVIM=$(date +%s)
-    log "☁️ [BG-1] Downloading Neovim ($NVIM_ARCH)..."
-    
-    # Primary: Latest release
-    NVIM_URL="https://github.com/neovim/neovim/releases/latest/download/${NVIM_ARCH}.tar.gz"
-    
-    if ! curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz 2>/dev/null; then
-        # Fallback: Stable release (v0.10.4)
-        warn "[BG-1] Latest failed, trying v0.10.4..."
-        NVIM_URL="https://github.com/neovim/neovim/releases/download/v0.10.4/${NVIM_ARCH}.tar.gz"
-        if ! curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz; then
-            err "[BG-1] Neovim download failed completely."
-            exit 1
+if [ "$ENABLE_NEOVIM" = "true" ]; then
+    (
+        START_NVIM=$(date +%s)
+        log "☁️ [BG-1] Downloading Neovim ($NVIM_ARCH)..."
+        
+        # Primary: Latest release
+        NVIM_URL="https://github.com/neovim/neovim/releases/latest/download/${NVIM_ARCH}.tar.gz"
+        
+        if ! curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz 2>/dev/null; then
+            # Fallback: Stable release (v0.10.4)
+            warn "[BG-1] Latest failed, trying v0.10.4..."
+            NVIM_URL="https://github.com/neovim/neovim/releases/download/v0.10.4/${NVIM_ARCH}.tar.gz"
+            if ! curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz; then
+                err "[BG-1] Neovim download failed completely."
+                exit 1
+            fi
         fi
-    fi
-    
-    sudo rm -rf /opt/nvim /opt/nvim-linux64 /opt/${NVIM_ARCH}
-    sudo tar -C /opt -xzf /tmp/nvim.tar.gz
-    rm -f /tmp/nvim.tar.gz
-    
-    # Create symlink for PATH accessibility
-    sudo ln -sf /opt/${NVIM_ARCH}/bin/nvim /usr/local/bin/nvim
-    
-    END_NVIM=$(date +%s)
-    log "✅ [BG-1] Neovim installed in $((END_NVIM - START_NVIM))s"
-) &
-BG_PIDS+=($!)
+        
+        sudo rm -rf /opt/nvim /opt/nvim-linux64 /opt/${NVIM_ARCH}
+        sudo tar -C /opt -xzf /tmp/nvim.tar.gz
+        rm -f /tmp/nvim.tar.gz
+        
+        # Create symlink for PATH accessibility
+        sudo ln -sf /opt/${NVIM_ARCH}/bin/nvim /usr/local/bin/nvim
+        
+        END_NVIM=$(date +%s)
+        log "✅ [BG-1] Neovim installed in $((END_NVIM - START_NVIM))s"
+    ) &
+    BG_PIDS+=($!)
+else
+    log "⏭️ [BG-1] Neovim disabled in config (skipping)."
+fi
 
 # JOB 2: Tmux Plugin Manager (independent, doesn't need OMZ)
-(
-    START=$(date +%s)
-    # Wait for git (max 60 seconds)
-    WAIT_COUNT=0
-    while ! command -v git &> /dev/null; do
-        sleep 2
-        ((WAIT_COUNT++)) || true
-        if [ $WAIT_COUNT -gt 30 ]; then
-            warn "[BG-2] Git not available after 60s, skipping TPM."
-            exit 0
+if [ "$ENABLE_TMUX" = "true" ]; then
+    (
+        START=$(date +%s)
+        # Wait for git (max 60 seconds)
+        WAIT_COUNT=0
+        while ! command -v git &> /dev/null; do
+            sleep 2
+            ((WAIT_COUNT++)) || true
+            if [ $WAIT_COUNT -gt 30 ]; then
+                warn "[BG-2] Git not available after 60s, skipping TPM."
+                exit 0
+            fi
+        done
+        
+        log "⚡ [BG-2] Cloning Tmux Plugin Manager..."
+        mkdir -p ~/.tmux/plugins
+        if [ ! -d ~/.tmux/plugins/tpm ]; then
+            git clone --depth=1 https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm >/dev/null 2>&1 || true
         fi
-    done
-    
-    log "⚡ [BG-2] Cloning Tmux Plugin Manager..."
-    mkdir -p ~/.tmux/plugins
-    if [ ! -d ~/.tmux/plugins/tpm ]; then
-        git clone --depth=1 https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm >/dev/null 2>&1 || true
-    fi
-    
-    END=$(date +%s)
-    log "✅ [BG-2] TPM installed in $((END - START))s"
-) &
-BG_PIDS+=($!)
+        
+        END=$(date +%s)
+        log "✅ [BG-2] TPM installed in $((END - START))s"
+    ) &
+    BG_PIDS+=($!)
+else
+    log "⏭️ [BG-2] Tmux/TPM disabled in config (skipping)."
+fi
 
 # JOB 3: NvChad Configuration
-(
-    START=$(date +%s)
-    
-    # Wait for git (max 60 seconds)
-    WAIT_COUNT=0
-    while ! command -v git &> /dev/null; do
-        sleep 2
-        ((WAIT_COUNT++)) || true
-        if [ $WAIT_COUNT -gt 30 ]; then exit 0; fi
-    done
+if [ "$ENABLE_NVCHAD" = "true" ]; then
+    (
+        START=$(date +%s)
+        
+        # Wait for git (max 60 seconds)
+        WAIT_COUNT=0
+        while ! command -v git &> /dev/null; do
+            sleep 2
+            ((WAIT_COUNT++)) || true
+            if [ $WAIT_COUNT -gt 30 ]; then exit 0; fi
+        done
 
-    # 100% Idempotent check: clone only if not already present
-    if [ ! -d "$HOME/.config/nvim" ]; then
-        log "🎨 [BG-3] Installing NvChad..."
-        git clone https://github.com/NvChad/starter ~/.config/nvim >/dev/null 2>&1 || true
-        END=$(date +%s)
-        log "✅ [BG-3] NvChad installed in $((END - START))s"
-    else
-        log "🎨 [BG-3] NvChad already installed (skipping clone)."
-    fi
-) &
-BG_PIDS+=($!)
+        # 100% Idempotent check: clone only if not already present
+        if [ ! -d "$HOME/.config/nvim" ]; then
+            log "🎨 [BG-3] Installing NvChad..."
+            git clone https://github.com/NvChad/starter ~/.config/nvim >/dev/null 2>&1 || true
+            END=$(date +%s)
+            log "✅ [BG-3] NvChad installed in $((END - START))s"
+        else
+            log "🎨 [BG-3] NvChad already installed (skipping clone)."
+        fi
+    ) &
+    BG_PIDS+=($!)
+else
+    log "⏭️ [BG-3] NvChad disabled in config (skipping)."
+fi
 
 # ==========================================
 # PHASE 2: APT Operations (Main Thread)
@@ -250,125 +281,152 @@ sudo apt-get update -qq
 log "📦 [APT] Upgrading system..."
 sudo apt-get upgrade -y -qq
 
-# Install core packages (prefer modern fastfetch with neofetch fallback)
-log "📦 [APT] Installing utilities..."
-FETCH_PKG="fastfetch"
-if ! apt-cache show fastfetch &>/dev/null; then
-    FETCH_PKG="neofetch"
+# Build dynamic APT package list based on user selections
+APT_PACKAGES=("curl" "git" "ca-certificates" "gnupg" "lsb-release")
+
+if [ "$ENABLE_ZSH" = "true" ]; then
+    APT_PACKAGES+=("zsh")
 fi
 
-sudo apt-get install -y -qq \
-    zsh tmux htop glances btop curl python-is-python3 p7zip-full ncdu "$FETCH_PKG" \
-    git ca-certificates gnupg lsb-release >/dev/null
+if [ "$ENABLE_TMUX" = "true" ]; then
+    APT_PACKAGES+=("tmux")
+fi
 
-# Change shell (only if not already zsh)
-ZSH_PATH=$(which zsh)
-if [ "$SHELL" != "$ZSH_PATH" ]; then
-    log "🐚 Changing default shell to zsh..."
-    sudo chsh -s "$ZSH_PATH" "$USER"
+if [ "$ENABLE_UTILITIES" = "true" ]; then
+    FETCH_PKG="fastfetch"
+    if ! apt-cache show fastfetch &>/dev/null; then
+        FETCH_PKG="neofetch"
+    fi
+    APT_PACKAGES+=("htop" "glances" "btop" "python-is-python3" "p7zip-full" "ncdu" "$FETCH_PKG")
+fi
+
+# Append custom extra APT packages if defined
+if [ ${#EXTRA_APT_PACKAGES[@]} -gt 0 ]; then
+    log "📦 [APT] Adding custom extra packages: ${EXTRA_APT_PACKAGES[*]}"
+    APT_PACKAGES+=("${EXTRA_APT_PACKAGES[@]}")
+fi
+
+log "📦 [APT] Installing packages: ${APT_PACKAGES[*]}..."
+sudo apt-get install -y -qq "${APT_PACKAGES[@]}" >/dev/null
+
+# Change shell (only if Zsh is enabled and not already default)
+if [ "$ENABLE_ZSH" = "true" ]; then
+    ZSH_PATH=$(which zsh)
+    if [ "$SHELL" != "$ZSH_PATH" ]; then
+        log "🐚 Changing default shell to zsh..."
+        sudo chsh -s "$ZSH_PATH" "$USER"
+    fi
 fi
 
 # ==========================================
 # Docker Install (with proper modern method)
 # ==========================================
-log "🐳 [APT] Installing Docker..."
+if [ "$ENABLE_DOCKER" = "true" ]; then
+    log "🐳 [APT] Installing Docker..."
 
-# Remove old versions if present
-sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    # Remove old versions if present
+    sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
 
-# Setup repository
-sudo install -m 0755 -d /etc/apt/keyrings
+    # Setup repository
+    sudo install -m 0755 -d /etc/apt/keyrings
 
-# Download GPG key (proper method for newer apt)
-DOCKER_GPG_URL="http://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg"
-sudo curl -fsSL "$DOCKER_GPG_URL" -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
+    # Download GPG key (proper method for newer apt)
+    DOCKER_GPG_URL="http://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg"
+    sudo curl -fsSL "$DOCKER_GPG_URL" -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
 
-# Add repository
-CODENAME=$(get_codename)
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] http://mirrors.aliyun.com/docker-ce/linux/ubuntu $CODENAME stable" | \
-    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    # Add repository
+    CODENAME=$(get_codename)
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] http://mirrors.aliyun.com/docker-ce/linux/ubuntu $CODENAME stable" | \
+        sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-sudo apt-get update -qq
-sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
 
-# Add current user to docker group (avoid needing sudo for docker)
-if ! groups "$USER" | grep -q docker; then
-    sudo usermod -aG docker "$USER"
-    log "👤 Added $USER to docker group (relogin required)"
+    # Add current user to docker group (avoid needing sudo for docker)
+    if ! groups "$USER" | grep -q docker; then
+        sudo usermod -aG docker "$USER"
+        log "👤 Added $USER to docker group (relogin required)"
+    fi
+else
+    log "⏭️ [DOCKER] Docker disabled in config (skipping)."
 fi
 
 # ==========================================
 # PHASE 3: Oh My Zsh (MUST complete before plugins)
 # ==========================================
-log "🐚 [ZSH] Installing Oh My Zsh..."
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    # Use RUNZSH=no to prevent it from starting zsh immediately
-    export RUNZSH=no
-    export CHSH=no
-    if ! sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended; then
-        err "Oh My Zsh installation failed!"
+if [ "$ENABLE_ZSH" = "true" ]; then
+    log "🐚 [ZSH] Installing Oh My Zsh..."
+    if [ ! -d "$HOME/.oh-my-zsh" ]; then
+        # Use RUNZSH=no to prevent it from starting zsh immediately
+        export RUNZSH=no
+        export CHSH=no
+        if ! sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended; then
+            err "Oh My Zsh installation failed!"
+            exit 1
+        fi
+    fi
+
+    # Verify OMZ installation
+    if [ ! -d "$HOME/.oh-my-zsh" ]; then
+        err "Oh My Zsh directory not found after installation!"
         exit 1
     fi
-fi
+    log "✅ [ZSH] Oh My Zsh ready."
 
-# Verify OMZ installation
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    err "Oh My Zsh directory not found after installation!"
-    exit 1
-fi
-log "✅ [ZSH] Oh My Zsh ready."
+    # ==========================================
+    # PHASE 4: Zsh Plugins (Parallel Cloning)
+    # ==========================================
+    log "⚡ [ZSH] Cloning plugins in parallel..."
 
-# ==========================================
-# PHASE 4: Zsh Plugins (Parallel Cloning)
-# ==========================================
-log "⚡ [ZSH] Cloning plugins in parallel..."
+    ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
 
-ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
-
-# Clone with error handling
-clone_plugin() {
-    local URL="$1"
-    local DEST="$2"
-    local NAME=$(basename "$DEST")
-    if [ ! -d "$DEST" ]; then
-        if git clone --depth=1 "$URL" "$DEST" >/dev/null 2>&1; then
-            log "   ✅ $NAME"
+    # Clone with error handling
+    clone_plugin() {
+        local URL="$1"
+        local DEST="$2"
+        local NAME=$(basename "$DEST")
+        if [ ! -d "$DEST" ]; then
+            if git clone --depth=1 "$URL" "$DEST" >/dev/null 2>&1; then
+                log "   ✅ $NAME"
+            else
+                warn "   ❌ Failed to clone $NAME"
+            fi
         else
-            warn "   ❌ Failed to clone $NAME"
+            log "   ⏭️ $NAME (already exists)"
         fi
-    else
-        log "   ⏭️ $NAME (already exists)"
+    }
+
+    # Clone plugins in parallel for max performance
+    PLUGIN_PIDS=()
+    clone_plugin "https://github.com/romkatv/powerlevel10k.git" "$ZSH_CUSTOM/themes/powerlevel10k" &
+    PLUGIN_PIDS+=($!)
+    clone_plugin "https://github.com/zsh-users/zsh-autosuggestions" "$ZSH_CUSTOM/plugins/zsh-autosuggestions" &
+    PLUGIN_PIDS+=($!)
+    clone_plugin "https://github.com/zsh-users/zsh-syntax-highlighting.git" "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" &
+    PLUGIN_PIDS+=($!)
+    clone_plugin "https://github.com/zsh-users/zsh-completions" "$ZSH_CUSTOM/plugins/zsh-completions" &
+    PLUGIN_PIDS+=($!)
+    clone_plugin "https://github.com/wting/autojump.git" "$ZSH_CUSTOM/plugins/autojump" &
+    PLUGIN_PIDS+=($!)
+
+    for pid in "${PLUGIN_PIDS[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+
+    # Install autojump
+    if [ -d "$ZSH_CUSTOM/plugins/autojump" ]; then
+        log "   🔧 Installing autojump..."
+        (
+            cd "$ZSH_CUSTOM/plugins/autojump"
+            python3 install.py >/dev/null 2>&1 || python install.py >/dev/null 2>&1 || true
+        )
     fi
-}
 
-# Clone plugins in parallel for max performance
-PLUGIN_PIDS=()
-clone_plugin "https://github.com/romkatv/powerlevel10k.git" "$ZSH_CUSTOM/themes/powerlevel10k" &
-PLUGIN_PIDS+=($!)
-clone_plugin "https://github.com/zsh-users/zsh-autosuggestions" "$ZSH_CUSTOM/plugins/zsh-autosuggestions" &
-PLUGIN_PIDS+=($!)
-clone_plugin "https://github.com/zsh-users/zsh-syntax-highlighting.git" "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" &
-PLUGIN_PIDS+=($!)
-clone_plugin "https://github.com/zsh-users/zsh-completions" "$ZSH_CUSTOM/plugins/zsh-completions" &
-PLUGIN_PIDS+=($!)
-clone_plugin "https://github.com/wting/autojump.git" "$ZSH_CUSTOM/plugins/autojump" &
-PLUGIN_PIDS+=($!)
-
-for pid in "${PLUGIN_PIDS[@]}"; do
-    wait "$pid" 2>/dev/null || true
-done
-
-# Install autojump
-if [ -d "$ZSH_CUSTOM/plugins/autojump" ]; then
-    log "   🔧 Installing autojump..."
-    (
-        cd "$ZSH_CUSTOM/plugins/autojump"
-        python3 install.py >/dev/null 2>&1 || python install.py >/dev/null 2>&1 || true
-    )
+    log "✅ [ZSH] All plugins installed."
+else
+    log "⏭️ [ZSH] Zsh/Oh-My-Zsh disabled in config (skipping)."
 fi
-
-log "✅ [ZSH] All plugins installed."
 
 # ==========================================
 # PHASE 5: Wait for Phase 1 background jobs
@@ -379,19 +437,20 @@ for pid in "${BG_PIDS[@]}"; do
 done
 
 # ==========================================
-# PHASE 6: Configuration
+# PHASE 6: Configuration Writing
 # ==========================================
 log "🔗 Writing configs..."
 
-# Create .zshrc
-cat << 'EOF' > ~/.zshrc
+# Create .zshrc if ZSH is enabled
+if [ "$ENABLE_ZSH" = "true" ]; then
+    cat << 'EOF' > ~/.zshrc
 # Enable Powerlevel10k instant prompt
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
 export ZSH="$HOME/.oh-my-zsh"
-# Neovim is now symlinked to /usr/local/bin, no need to modify PATH
+# Neovim is symlinked to /usr/local/bin, no need to modify PATH
 
 ZSH_THEME="powerlevel10k/powerlevel10k"
 
@@ -414,9 +473,11 @@ source $ZSH/oh-my-zsh.sh
 # Autojump
 [[ -s ~/.autojump/etc/profile.d/autojump.sh ]] && source ~/.autojump/etc/profile.d/autojump.sh
 EOF
+fi
 
-# Tmux Conf
-cat << 'EOF' > ~/.tmux.conf
+# Create .tmux.conf if TMUX is enabled
+if [ "$ENABLE_TMUX" = "true" ]; then
+    cat << 'EOF' > ~/.tmux.conf
 # Plugins
 set -g @plugin 'tmux-plugins/tpm'
 set -g @plugin 'tmux-plugins/tmux-sensible'
@@ -438,9 +499,10 @@ bind-key C-a send-prefix
 run '~/.tmux/plugins/tpm/tpm'
 EOF
 
-# Reload tmux if running
-if pgrep tmux >/dev/null; then
-    tmux source ~/.tmux.conf 2>/dev/null || true
+    # Reload tmux if running
+    if pgrep tmux >/dev/null; then
+        tmux source ~/.tmux.conf 2>/dev/null || true
+    fi
 fi
 
 # ==========================================
@@ -455,21 +517,23 @@ log "✨ Installation Complete!"
 log "=========================================="
 log "⏱️  Total time: ${DURATION}s"
 log ""
-log "📋 What's installed:"
-log "   • Zsh + Oh My Zsh + Powerlevel10k"
-log "   • Neovim (latest) + NvChad"
-log "   • Docker + Compose"
-log "   • Tmux + TPM"
-log "   • Utilities: htop, btop, glances, ncdu, fastfetch/neofetch"
+log "📋 Service Deployment Summary:"
+[ "$ENABLE_ZSH" = "true" ]       && log "   • [ON]  Zsh + Oh My Zsh + Powerlevel10k" || log "   • [OFF] Zsh"
+[ "$ENABLE_NEOVIM" = "true" ]    && log "   • [ON]  Neovim (latest)" || log "   • [OFF] Neovim"
+[ "$ENABLE_NVCHAD" = "true" ]    && log "   • [ON]  NvChad Configuration" || log "   • [OFF] NvChad"
+[ "$ENABLE_DOCKER" = "true" ]    && log "   • [ON]  Docker + Compose" || log "   • [OFF] Docker"
+[ "$ENABLE_TMUX" = "true" ]      && log "   • [ON]  Tmux + TPM" || log "   • [OFF] Tmux"
+[ "$ENABLE_UTILITIES" = "true" ] && log "   • [ON]  CLI Utilities (htop, btop, glances, ncdu, fastfetch)" || log "   • [OFF] CLI Utilities"
+if [ ${#EXTRA_APT_PACKAGES[@]} -gt 0 ]; then
+    log "   • [EXT] Extra Packages: ${EXTRA_APT_PACKAGES[*]}"
+fi
 log ""
 log "⚠️  IMPORTANT: Please run these commands:"
-log "   1. Log out and log back in (for docker group & zsh)"
-log "   2. Run 'p10k configure' to setup your prompt theme"
+log "   1. Log out and log back in (for group & shell refresh)"
+[ "$ENABLE_ZSH" = "true" ] && log "   2. Run 'p10k configure' to setup your prompt theme"
 log ""
 
 # Cleanly terminate any remaining background keepalive loops
 for pid in "${BG_PIDS[@]}"; do
     kill "$pid" 2>/dev/null || true
 done
-
-
