@@ -3,7 +3,7 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v4.3: Ubuntu 24.04 (DEB822), Fastfetch, Sudo Keepalive & Parallel Plugins
+# v4.4: Dynamic Cloud/Original Mirror Race & IPv4 Speedtest
 set -euo pipefail
 START_TIME=$(date +%s)
 
@@ -178,11 +178,31 @@ select_fastest_mirror() {
         "http://archive.ubuntu.com/ubuntu"
     )
     
+    # Dynamically extract original/default cloud mirror if available (e.g. AWS ec2.archive.ubuntu.com / GCP / Azure)
+    local ORIGINAL_MIRROR=""
+    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+        ORIGINAL_MIRROR=$(grep -E -o "https?://[a-zA-Z0-9.-]+/ubuntu" /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null | head -n 1 || true)
+    elif [ -f /etc/apt/sources.list ]; then
+        ORIGINAL_MIRROR=$(grep -E -o "https?://[a-zA-Z0-9.-]+/ubuntu" /etc/apt/sources.list 2>/dev/null | head -n 1 || true)
+    fi
+
+    if [ -n "$ORIGINAL_MIRROR" ]; then
+        local EXISTS=0
+        for url in "${MIRROR_URLS[@]}"; do
+            if [ "$url" = "$ORIGINAL_MIRROR" ]; then EXISTS=1; break; fi
+        done
+        if [ $EXISTS -eq 0 ]; then
+            MIRROR_NAMES+=("Original/Cloud")
+            MIRROR_URLS+=("$ORIGINAL_MIRROR")
+        fi
+    fi
+    
     for i in "${!MIRROR_NAMES[@]}"; do
         local NAME="${MIRROR_NAMES[$i]}"
         local URL="${MIRROR_URLS[$i]}"
         local TIME
-        TIME=$(curl -s -o /dev/null -w "%{time_total}" --connect-timeout 2 --max-time 3 "$URL/dists/$CODENAME/Release" 2>/dev/null) || TIME=""
+        # Force IPv4 (-4) to eliminate dual-stack IPv6 DNS/handshake timeouts
+        TIME=$(curl -4 -s -o /dev/null -w "%{time_total}" --connect-timeout 2 --max-time 3 "$URL/dists/$CODENAME/Release" 2>/dev/null) || TIME=""
         if [ -n "$TIME" ] && [ "$TIME" != "0.000000" ]; then
             echo "$TIME $URL" >> "$TEMP_FILE"
             log "   👉 $NAME: ${TIME}s"
@@ -200,14 +220,12 @@ select_fastest_mirror() {
         # Ubuntu 24.04+ (DEB822 format in ubuntu.sources)
         if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
             [ ! -f /etc/apt/sources.list.d/ubuntu.sources.bak ] && sudo cp /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.bak
-            sudo sed -i -E "s|http://.*archive.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list.d/ubuntu.sources
-            sudo sed -i -E "s|http://security.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list.d/ubuntu.sources
+            sudo sed -i -E "s|https?://[a-zA-Z0-9.-]+/ubuntu|$WINNER|g" /etc/apt/sources.list.d/ubuntu.sources
         fi
         # Legacy format (Ubuntu <= 22.04 in sources.list)
         if [ -f /etc/apt/sources.list ]; then
             [ ! -f /etc/apt/sources.list.bak ] && sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak
-            sudo sed -i -E "s|http://.*archive.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
-            sudo sed -i -E "s|http://security.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
+            sudo sed -i -E "s|https?://[a-zA-Z0-9.-]+/ubuntu|$WINNER|g" /etc/apt/sources.list
         fi
     else
         warn "Mirror optimization failed, using default sources."
