@@ -3,12 +3,12 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v5.1: Declarative Service Selection, Custom Extra APT Packages & Cloud-Ready
+# v5.2: Unified APT Package Array & Declarative Service Toggles
 set -euo pipefail
 START_TIME=$(date +%s)
 
 # ==========================================
-# ⚙️ User Feature Selection (服务选择列表)
+# ⚙️ User Feature Selection (大型服务开关)
 # ==========================================
 # 默认全选 (true)。若某台机器不需要某项服务，直接改为 false 即可跳过！
 ENABLE_NEOVIM=true       # Neovim (最新二进制 /usr/local/bin/nvim)
@@ -16,11 +16,19 @@ ENABLE_NVCHAD=true       # NvChad 开箱即用配置 (~/.config/nvim)
 ENABLE_TMUX=true         # Tmux + 插件管理器 (TPM) + 状态恢复
 ENABLE_ZSH=true          # Zsh + Oh My Zsh + Powerlevel10k + 5大插件
 ENABLE_DOCKER=true       # Docker CE + CLI + Compose Plugin
-ENABLE_UTILITIES=true    # 常用 CLI 监控分析工具箱 (htop, btop, glances, fastfetch, ncdu)
 
-# 📦 自定义额外 APT 软件包列表 (仅限于 apt 包):
-# 在数组中直接添加您需要的额外 apt 软件包名，例如: "podman" "ripgrep" "fd-find"
-EXTRA_APT_PACKAGES=(
+# ==========================================
+# 📦 APT 软件包管理列表 (可自由增删/注释)
+# ==========================================
+# 所有系统工具与扩展软件统一在此数组中管理：
+APT_PACKAGES=(
+    "htop"
+    "btop"
+    "glances"
+    "ncdu"
+    "p7zip-full"
+    "python-is-python3"
+    "fastfetch"           # 若旧版 Ubuntu 无 fastfetch 会自动智能回退为 neofetch
     # "podman"
     # "ripgrep"
     # "fd-find"
@@ -281,33 +289,29 @@ sudo apt-get update -qq
 log "📦 [APT] Upgrading system..."
 sudo apt-get upgrade -y -qq
 
-# Build dynamic APT package list based on user selections
-APT_PACKAGES=("curl" "git" "ca-certificates" "gnupg" "lsb-release")
+# Assemble complete list of packages to install
+INSTALL_PACKAGES=("curl" "git" "ca-certificates" "gnupg" "lsb-release")
 
 if [ "$ENABLE_ZSH" = "true" ]; then
-    APT_PACKAGES+=("zsh")
+    INSTALL_PACKAGES+=("zsh")
 fi
 
 if [ "$ENABLE_TMUX" = "true" ]; then
-    APT_PACKAGES+=("tmux")
+    INSTALL_PACKAGES+=("tmux")
 fi
 
-if [ "$ENABLE_UTILITIES" = "true" ]; then
-    FETCH_PKG="fastfetch"
-    if ! apt-cache show fastfetch &>/dev/null; then
-        FETCH_PKG="neofetch"
+# Add all user-defined APT packages with fastfetch auto-fallback
+for pkg in "${APT_PACKAGES[@]}"; do
+    if [ "$pkg" = "fastfetch" ]; then
+        if ! apt-cache show fastfetch &>/dev/null; then
+            pkg="neofetch"
+        fi
     fi
-    APT_PACKAGES+=("htop" "glances" "btop" "python-is-python3" "p7zip-full" "ncdu" "$FETCH_PKG")
-fi
+    INSTALL_PACKAGES+=("$pkg")
+done
 
-# Append custom extra APT packages if defined
-if [ ${#EXTRA_APT_PACKAGES[@]} -gt 0 ]; then
-    log "📦 [APT] Adding custom extra packages: ${EXTRA_APT_PACKAGES[*]}"
-    APT_PACKAGES+=("${EXTRA_APT_PACKAGES[@]}")
-fi
-
-log "📦 [APT] Installing packages: ${APT_PACKAGES[*]}..."
-sudo apt-get install -y -qq "${APT_PACKAGES[@]}" >/dev/null
+log "📦 [APT] Installing packages: ${INSTALL_PACKAGES[*]}..."
+sudo apt-get install -y -qq "${INSTALL_PACKAGES[@]}" >/dev/null
 
 # Change shell (only if Zsh is enabled and not already default)
 if [ "$ENABLE_ZSH" = "true" ]; then
@@ -523,9 +527,8 @@ log "📋 Service Deployment Summary:"
 [ "$ENABLE_NVCHAD" = "true" ]    && log "   • [ON]  NvChad Configuration" || log "   • [OFF] NvChad"
 [ "$ENABLE_DOCKER" = "true" ]    && log "   • [ON]  Docker + Compose" || log "   • [OFF] Docker"
 [ "$ENABLE_TMUX" = "true" ]      && log "   • [ON]  Tmux + TPM" || log "   • [OFF] Tmux"
-[ "$ENABLE_UTILITIES" = "true" ] && log "   • [ON]  CLI Utilities (htop, btop, glances, ncdu, fastfetch)" || log "   • [OFF] CLI Utilities"
-if [ ${#EXTRA_APT_PACKAGES[@]} -gt 0 ]; then
-    log "   • [EXT] Extra Packages: ${EXTRA_APT_PACKAGES[*]}"
+if [ ${#APT_PACKAGES[@]} -gt 0 ]; then
+    log "   • [APT] Installed Packages: ${APT_PACKAGES[*]}"
 fi
 log ""
 log "⚠️  IMPORTANT: Please run these commands:"
