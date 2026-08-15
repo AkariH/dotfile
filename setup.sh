@@ -3,7 +3,7 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v5.3: AWS IMDS Region Auto-Discovery & Factory Mirror Preservation
+# v5.4: Self-Healing DPKG, Hardened Docker Architecture & Server KeepAlive
 set -euo pipefail
 START_TIME=$(date +%s)
 
@@ -23,8 +23,7 @@ ENABLE_DOCKER=true       # Docker CE + CLI + Compose Plugin
 # 所有系统工具与扩展软件统一在此数组中管理：
 APT_PACKAGES=(
     "htop"
-    "btop"
-    "glances"
+    "btop"                # 极简轻量、颜值与性能双登顶的 C++ 监控神器
     "ncdu"
     "p7zip-full"
     "python-is-python3"
@@ -301,12 +300,20 @@ select_fastest_mirror() {
 
 select_fastest_mirror
 
+# Auto-repair any interrupted dpkg transactions (e.g. previous Ctrl+C)
+sudo dpkg --configure -a 2>/dev/null || true
+
 # Update and Upgrade
 log "📦 [APT] Updating package lists..."
 sudo apt-get update -qq
 
 log "📦 [APT] Upgrading system..."
 sudo apt-get upgrade -y -qq
+
+# Server-side SSH keepalive (prevents remote terminal drops)
+if [ -d /etc/ssh/sshd_config.d ]; then
+    echo -e "ClientAliveInterval 30\nClientAliveCountMax 5" | sudo tee /etc/ssh/sshd_config.d/99-keepalive.conf >/dev/null 2>&1 || true
+fi
 
 # Assemble complete list of packages to install
 INSTALL_PACKAGES=("curl" "git" "ca-certificates" "gnupg" "lsb-release")
@@ -347,24 +354,37 @@ fi
 if [ "$ENABLE_DOCKER" = "true" ]; then
     log "🐳 [APT] Installing Docker..."
 
-    # Remove old versions if present
-    sudo apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+    # Safely remove conflicting legacy packages
+    for old_pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+        sudo apt-get remove -y "$old_pkg" 2>/dev/null || true
+    done
 
-    # Setup repository
+    # Setup keyrings directory
     sudo install -m 0755 -d /etc/apt/keyrings
+    sudo rm -f /etc/apt/keyrings/docker.asc
 
-    # Download GPG key (proper method for newer apt)
-    DOCKER_GPG_URL="http://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg"
-    sudo curl -fsSL "$DOCKER_GPG_URL" -o /etc/apt/keyrings/docker.asc
+    # Download GPG key (Primary: official docker, Fallback: aliyun)
+    if ! sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null; then
+        sudo curl -fsSL http://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc 2>/dev/null || true
+    fi
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
-    # Add repository
+    # Add official docker repository
     CODENAME=$(get_codename)
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] http://mirrors.aliyun.com/docker-ce/linux/ubuntu $CODENAME stable" | \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $CODENAME stable" | \
         sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+    # If official repo fails to update, seamlessly fallback to Aliyun mirror
+    if ! sudo apt-get update -qq 2>/dev/null; then
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] http://mirrors.aliyun.com/docker-ce/linux/ubuntu $CODENAME stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update -qq
+    fi
+
+    # Install Docker packages with auto-fallback
+    if ! sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1; then
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    fi
 
     # Add current user to docker group (avoid needing sudo for docker)
     if ! groups "$USER" | grep -q docker; then
