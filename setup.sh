@@ -3,7 +3,7 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v5.5: Configurable systemd-zram-generator (ram*2 / ram*0.5) & Kernel Compression
+# v5.6: Sudo KeepAlive Decoupling & Deadlock Elimination
 set -euo pipefail
 START_TIME=$(date +%s)
 
@@ -63,7 +63,10 @@ measure() {
     log "⏱️  [$NAME] took $((END - START))s"
 }
 
-# Store PIDs to wait for them later & clean them up on interrupt
+# Store keepalive PID separately so it is NOT blocked in wait loops
+SUDO_KEEPALIVE_PID=""
+
+# Store worker task PIDs (Neovim, TPM, NvChad) to wait for them later & clean them up on interrupt
 declare -a BG_PIDS=()
 
 # Graceful cleanup on interrupt (Ctrl+C / SIGTERM)
@@ -73,6 +76,9 @@ cleanup() {
     for pid in "${BG_PIDS[@]}"; do
         kill -9 "$pid" 2>/dev/null || true
     done
+    if [ -n "$SUDO_KEEPALIVE_PID" ]; then
+        kill -9 "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    fi
     exit 130
 }
 trap cleanup INT TERM
@@ -80,9 +86,9 @@ trap cleanup INT TERM
 # Sudo check and background keepalive (using -n to avoid interactive password prompt)
 if [ "$EUID" -ne 0 ]; then
     if sudo -n true 2>/dev/null; then
-        # Keep-alive sudo in background while script runs (tracked in BG_PIDS for clean exit)
+        # Keep-alive sudo in background while script runs (tracked in SUDO_KEEPALIVE_PID)
         ( while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done 2>/dev/null ) &
-        BG_PIDS+=($!)
+        SUDO_KEEPALIVE_PID=$!
     fi
 else
     warn "Running as root is not recommended. Consider running as normal user with sudo."
@@ -642,3 +648,7 @@ log ""
 for pid in "${BG_PIDS[@]}"; do
     kill "$pid" 2>/dev/null || true
 done
+if [ -n "$SUDO_KEEPALIVE_PID" ]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+fi
+
