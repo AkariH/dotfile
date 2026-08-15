@@ -3,7 +3,7 @@
 # ==========================================
 # Akari's Dotfile Optimized Installer 🚀
 # ==========================================
-# v4: Neovim URL Fix + Per-Step Timing
+# v4.3: Ubuntu 24.04 (DEB822), Fastfetch, Sudo Keepalive & Parallel Plugins
 set -euo pipefail
 START_TIME=$(date +%s)
 
@@ -32,8 +32,13 @@ measure() {
     log "⏱️  [$NAME] took $((END - START))s"
 }
 
-# Check if running as root (not recommended)
-if [ "$EUID" -eq 0 ]; then
+# Ensure sudo session is active and keep it alive for background tasks
+if [ "$EUID" -ne 0 ]; then
+    if sudo -v 2>/dev/null; then
+        # Keep-alive sudo in background while script runs
+        while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
+    fi
+else
     warn "Running as root is not recommended. Consider running as normal user with sudo."
 fi
 
@@ -61,9 +66,9 @@ esac
     NVIM_URL="https://github.com/neovim/neovim/releases/latest/download/${NVIM_ARCH}.tar.gz"
     
     if ! curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz 2>/dev/null; then
-        # Fallback: Known good version
-        warn "[BG-1] Latest failed, trying v0.9.5..."
-        NVIM_URL="https://github.com/neovim/neovim/releases/download/v0.9.5/${NVIM_ARCH}.tar.gz"
+        # Fallback: Stable release (v0.10.4)
+        warn "[BG-1] Latest failed, trying v0.10.4..."
+        NVIM_URL="https://github.com/neovim/neovim/releases/download/v0.10.4/${NVIM_ARCH}.tar.gz"
         if ! curl -fsSL "$NVIM_URL" -o /tmp/nvim.tar.gz; then
             err "[BG-1] Neovim download failed completely."
             exit 1
@@ -192,10 +197,18 @@ select_fastest_mirror() {
     
     if [ -n "$WINNER" ]; then
         log "🏆 Applying fastest mirror: $WINNER"
-        [ ! -f /etc/apt/sources.list.bak ] && sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak
-        # Robust regex to catch cn.archive.ubuntu.com, etc.
-        sudo sed -i -E "s|http://.*archive.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
-        sudo sed -i -E "s|http://security.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
+        # Ubuntu 24.04+ (DEB822 format in ubuntu.sources)
+        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            [ ! -f /etc/apt/sources.list.d/ubuntu.sources.bak ] && sudo cp /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.bak
+            sudo sed -i -E "s|http://.*archive.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list.d/ubuntu.sources
+            sudo sed -i -E "s|http://security.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list.d/ubuntu.sources
+        fi
+        # Legacy format (Ubuntu <= 22.04 in sources.list)
+        if [ -f /etc/apt/sources.list ]; then
+            [ ! -f /etc/apt/sources.list.bak ] && sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak
+            sudo sed -i -E "s|http://.*archive.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
+            sudo sed -i -E "s|http://security.ubuntu.com/ubuntu|$WINNER|g" /etc/apt/sources.list
+        fi
     else
         warn "Mirror optimization failed, using default sources."
     fi
@@ -210,10 +223,15 @@ sudo apt-get update -qq
 log "📦 [APT] Upgrading system..."
 sudo apt-get upgrade -y -qq
 
-# Install core packages
+# Install core packages (prefer modern fastfetch with neofetch fallback)
 log "📦 [APT] Installing utilities..."
+FETCH_PKG="fastfetch"
+if ! apt-cache show fastfetch &>/dev/null; then
+    FETCH_PKG="neofetch"
+fi
+
 sudo apt-get install -y -qq \
-    zsh tmux htop glances btop curl python-is-python3 p7zip-full ncdu neofetch \
+    zsh tmux htop glances btop curl python-is-python3 p7zip-full ncdu "$FETCH_PKG" \
     git ca-certificates gnupg lsb-release >/dev/null
 
 # Change shell (only if not already zsh)
@@ -275,9 +293,9 @@ fi
 log "✅ [ZSH] Oh My Zsh ready."
 
 # ==========================================
-# PHASE 4: Zsh Plugins (AFTER OMZ is confirmed)
+# PHASE 4: Zsh Plugins (Parallel Cloning)
 # ==========================================
-log "⚡ [ZSH] Cloning plugins..."
+log "⚡ [ZSH] Cloning plugins in parallel..."
 
 ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
 
@@ -297,12 +315,22 @@ clone_plugin() {
     fi
 }
 
-# Clone plugins (sequential for better error visibility, still fast due to --depth=1)
-clone_plugin "https://github.com/romkatv/powerlevel10k.git" "$ZSH_CUSTOM/themes/powerlevel10k"
-clone_plugin "https://github.com/zsh-users/zsh-autosuggestions" "$ZSH_CUSTOM/plugins/zsh-autosuggestions"
-clone_plugin "https://github.com/zsh-users/zsh-syntax-highlighting.git" "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting"
-clone_plugin "https://github.com/zsh-users/zsh-completions" "$ZSH_CUSTOM/plugins/zsh-completions"
-clone_plugin "https://github.com/wting/autojump.git" "$ZSH_CUSTOM/plugins/autojump"
+# Clone plugins in parallel for max performance
+PLUGIN_PIDS=()
+clone_plugin "https://github.com/romkatv/powerlevel10k.git" "$ZSH_CUSTOM/themes/powerlevel10k" &
+PLUGIN_PIDS+=($!)
+clone_plugin "https://github.com/zsh-users/zsh-autosuggestions" "$ZSH_CUSTOM/plugins/zsh-autosuggestions" &
+PLUGIN_PIDS+=($!)
+clone_plugin "https://github.com/zsh-users/zsh-syntax-highlighting.git" "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" &
+PLUGIN_PIDS+=($!)
+clone_plugin "https://github.com/zsh-users/zsh-completions" "$ZSH_CUSTOM/plugins/zsh-completions" &
+PLUGIN_PIDS+=($!)
+clone_plugin "https://github.com/wting/autojump.git" "$ZSH_CUSTOM/plugins/autojump" &
+PLUGIN_PIDS+=($!)
+
+for pid in "${PLUGIN_PIDS[@]}"; do
+    wait "$pid" 2>/dev/null || true
+done
 
 # Install autojump
 if [ -d "$ZSH_CUSTOM/plugins/autojump" ]; then
@@ -405,9 +433,10 @@ log "   • Zsh + Oh My Zsh + Powerlevel10k"
 log "   • Neovim (latest) + NvChad"
 log "   • Docker + Compose"
 log "   • Tmux + TPM"
-log "   • Utilities: htop, btop, glances, ncdu, neofetch"
+log "   • Utilities: htop, btop, glances, ncdu, fastfetch/neofetch"
 log ""
 log "⚠️  IMPORTANT: Please run these commands:"
 log "   1. Log out and log back in (for docker group & zsh)"
 log "   2. Run 'p10k configure' to setup your prompt theme"
 log ""
+
